@@ -1,0 +1,101 @@
+name: Build APK from uploaded ZIP
+
+on:
+  push:
+    branches: ["main", "master"]
+    paths:
+      - "alhadi-cmms-apk-github.zip"
+      - ".github/workflows/build-apk-from-zip.yml"
+  workflow_dispatch:
+    inputs:
+      api_url:
+        description: "Backend API URL مثل https://your-domain.com/api"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+
+    env:
+      VITE_API_URL: ${{ github.event.inputs.api_url || '' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check ZIP file
+        run: |
+          if [ ! -f "alhadi-cmms-apk-github.zip" ]; then
+            echo "لم يتم العثور على alhadi-cmms-apk-github.zip"
+            exit 1
+          fi
+
+      - name: Unzip project
+        run: |
+          rm -rf extracted project
+          mkdir extracted
+          unzip -q alhadi-cmms-apk-github.zip -d extracted
+
+          if [ -d "extracted/alhadi-cmms-apk-github" ]; then
+            cp -a extracted/alhadi-cmms-apk-github project
+          else
+            firstdir="$(find extracted -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+            if [ -n "$firstdir" ] && [ -f "$firstdir/package.json" ]; then
+              cp -a "$firstdir" project
+            else
+              cp -a extracted project
+            fi
+          fi
+
+          ls -la project
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        working-directory: project
+        run: npm install
+
+      - name: Build React app
+        working-directory: project
+        run: npm run build
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Add Android platform
+        working-directory: project
+        run: |
+          if [ ! -d android ]; then
+            npx cap add android
+          fi
+
+      - name: Sync Android project
+        working-directory: project
+        run: npx cap sync android
+
+      - name: Build Debug APK
+        working-directory: project
+        run: |
+          chmod +x android/gradlew
+          cd android
+          ./gradlew assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Alhadi-CMMS-debug-apk
+          path: project/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
